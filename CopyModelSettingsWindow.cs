@@ -92,12 +92,12 @@ public class CopyModelSettingsWindow : EditorWindow
         EditorGUILayout.Space(6);
     }
 
-    // ----------- ����ʶ��ִ�и��� -----------
+    // ----------- 智能识别并执行复制 -----------
     void CopySettingsSmart()
     {
         if (sourcePrefab == null || targetPrefab == null)
         {
-            EditorUtility.DisplayDialog("完成", "模型设置已成功复制！", "确定");
+            EditorUtility.DisplayDialog("提示", "请先指定源模型和目标模型！", "确定");
             return;
         }
 
@@ -114,7 +114,7 @@ public class CopyModelSettingsWindow : EditorWindow
             {
                 string path = AssetDatabase.GetAssetPath(sourcePrefab);
                 srcRoot = PrefabUtility.LoadPrefabContents(path);
-                Debug.Log($"🔹已加载源Prefab{path}");
+                Debug.Log($"🔹已加载源 Prefab：{path}");
             }
             else
             {
@@ -125,22 +125,22 @@ public class CopyModelSettingsWindow : EditorWindow
             {
                 dstPath = AssetDatabase.GetAssetPath(targetPrefab);
                 dstRoot = PrefabUtility.LoadPrefabContents(dstPath);
-                Debug.Log($"🔹已加载目标Prefab：{dstPath}");
+                Debug.Log($"🔹已加载目标 Prefab：{dstPath}");
             }
             else
             {
                 dstRoot = targetPrefab;
             }
 
-            // traverse source hierarchy and copy to matching target objects
+            // 遍历源层级并复制到匹配的目标对象
             int copiedCount = CopyHierarchy(srcRoot, dstRoot);
-            Debug.Log($"? �ܹ����Ƶ� {copiedCount} ������\\n");
+            Debug.Log($"✅ 共复制了 {copiedCount} 个对象的设置。");
 
             if (dstIsPrefabAsset && dstRoot != null)
             {
                 PrefabUtility.SaveAsPrefabAsset(dstRoot, dstPath);
                 PrefabUtility.UnloadPrefabContents(dstRoot);
-                Debug.Log("?? �ѱ����޸ĵ�Ŀ��Prefab��");
+                Debug.Log("💾 已保存修改到目标 Prefab。");
                 AssetDatabase.SaveAssets();
             }
             else if (dstRoot != null)
@@ -153,11 +153,11 @@ public class CopyModelSettingsWindow : EditorWindow
             if (srcIsPrefabAsset && srcRoot != null)
                 PrefabUtility.UnloadPrefabContents(srcRoot);
 
-            EditorUtility.DisplayDialog("���", "ģ�������ѳɹ����ƣ�", "ȷ��");
+            EditorUtility.DisplayDialog("完成", "模型设置已成功复制！", "确定");
         }
         catch (Exception ex)
         {
-            Debug.LogError($"? ����ʧ��: {ex.Message}\\n{ex.StackTrace}");
+            Debug.LogError($"❌ 复制失败: {ex.Message}\n{ex.StackTrace}");
         }
     }
 
@@ -167,7 +167,7 @@ public class CopyModelSettingsWindow : EditorWindow
                PrefabUtility.GetPrefabAssetType(obj) != PrefabAssetType.NotAPrefab;
     }
 
-    // traverse source hierarchy, find matching target by relative path or name and copy settings
+    // 遍历源层级，按路径或名称匹配目标对象并复制
     int CopyHierarchy(GameObject srcRoot, GameObject dstRoot)
     {
         if (srcRoot == null || dstRoot == null) return 0;
@@ -186,7 +186,7 @@ public class CopyModelSettingsWindow : EditorWindow
                 dstObj = dstRoot.transform.Find(rel)?.gameObject;
                 if (dstObj == null)
                 {
-                    // try find by name anywhere under dstRoot
+                    // 若找不到路径匹配，则按名称搜索
                     var candidates = dstRoot.GetComponentsInChildren<Transform>(true)
                         .Where(x => x.name == t.name).ToArray();
                     dstObj = candidates.Length > 0 ? candidates[0].gameObject : null;
@@ -293,7 +293,7 @@ public class CopyModelSettingsWindow : EditorWindow
         }
 #endif
 
-        // Copy all other components
+        // 复制所有其他组件
         if (copyAllComponents)
         {
             var srcComps = srcObj.GetComponents<Component>();
@@ -338,7 +338,7 @@ public class CopyModelSettingsWindow : EditorWindow
             parts.Add(t.name);
             t = t.parent;
         }
-        if (t != root) // root ���� ancestor
+        if (t != root) // root 不是 ancestor
             return null;
         parts.Reverse();
         return string.Join("/", parts);
