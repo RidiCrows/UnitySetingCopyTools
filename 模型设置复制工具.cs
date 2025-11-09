@@ -9,7 +9,6 @@ public class CopyModelSettingsWindow : EditorWindow
     GameObject sourcePrefab;
     GameObject targetPrefab;
 
-    // 选项
     bool copyTransform;
     bool copyAnimator;
     bool copyMaterials;
@@ -19,13 +18,12 @@ public class CopyModelSettingsWindow : EditorWindow
     bool copyAllComponents;
 
     Vector2 scroll;
-
     const string PREF_PREFIX = "CopyModelSettings_";
 
-    [MenuItem("Tools/模型设置复制工具")]
+    [MenuItem("Tools/Copy Model Settings")]
     public static void ShowWindow()
     {
-        GetWindow<CopyModelSettingsWindow>("模型设置复制工具");
+        GetWindow<CopyModelSettingsWindow>("Copy Model Settings");
     }
 
     void OnEnable()
@@ -54,15 +52,14 @@ public class CopyModelSettingsWindow : EditorWindow
     {
         EditorGUILayout.Space(6);
         EditorGUILayout.LabelField("模型设置复制工具", EditorStyles.boldLabel);
-        EditorGUILayout.HelpBox("从上方源模型复制所选设置到下方目标模型。", MessageType.Info);
+        EditorGUILayout.HelpBox("可拖入场景中的模型对象，或直接拖入 Prefab 文件（会自动打开并保存修改）", MessageType.Info);
         EditorGUILayout.Space(8);
 
         scroll = EditorGUILayout.BeginScrollView(scroll);
-
-        EditorGUILayout.LabelField("源模型 (Source Prefab)", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("源模型 (Source)", EditorStyles.boldLabel);
         sourcePrefab = (GameObject)EditorGUILayout.ObjectField(sourcePrefab, typeof(GameObject), false);
 
-        EditorGUILayout.LabelField("目标模型 (Target Prefab)", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("目标模型 (Target)", EditorStyles.boldLabel);
         targetPrefab = (GameObject)EditorGUILayout.ObjectField(targetPrefab, typeof(GameObject), false);
 
         DrawSeparator();
@@ -82,7 +79,7 @@ public class CopyModelSettingsWindow : EditorWindow
         GUI.enabled = sourcePrefab && targetPrefab;
         if (GUILayout.Button("复制设置", GUILayout.Height(35)))
         {
-            CopySettings();
+            CopySettingsSmart();
         }
         GUI.enabled = true;
     }
@@ -95,115 +92,146 @@ public class CopyModelSettingsWindow : EditorWindow
         EditorGUILayout.Space(6);
     }
 
-    void CopySettings()
+    // ----------- 智能识别并执行复制 -----------
+    void CopySettingsSmart()
     {
-        if (!sourcePrefab || !targetPrefab)
-        {
-            EditorUtility.DisplayDialog("提示", "请先选择源模型和目标模型。", "确定");
-            return;
-        }
+        bool srcIsPrefabAsset = IsPrefabAsset(sourcePrefab);
+        bool dstIsPrefabAsset = IsPrefabAsset(targetPrefab);
 
-        Undo.RegisterFullObjectHierarchyUndo(targetPrefab, "Copy Model Settings");
-
-        int copied = 0;
-        var src = sourcePrefab;
-        var dst = targetPrefab;
+        GameObject srcRoot = null;
+        GameObject dstRoot = null;
+        string dstPath = null;
 
         try
         {
-            if (copyTransform)
+            if (srcIsPrefabAsset)
             {
-                dst.transform.localPosition = src.transform.localPosition;
-                dst.transform.localRotation = src.transform.localRotation;
-                dst.transform.localScale = src.transform.localScale;
-                copied++;
+                string path = AssetDatabase.GetAssetPath(sourcePrefab);
+                srcRoot = PrefabUtility.LoadPrefabContents(path);
+                Debug.Log($"🔹已加载源Prefab：{path}");
+            }
+            else
+            {
+                srcRoot = sourcePrefab;
             }
 
-            if (copyAnimator)
+            if (dstIsPrefabAsset)
             {
-                var srcAnim = src.GetComponent<Animator>();
-                var dstAnim = dst.GetComponent<Animator>();
-                if (srcAnim && dstAnim)
-                {
-                    dstAnim.runtimeAnimatorController = srcAnim.runtimeAnimatorController;
-                    dstAnim.avatar = srcAnim.avatar;
-                    copied++;
-                }
+                dstPath = AssetDatabase.GetAssetPath(targetPrefab);
+                dstRoot = PrefabUtility.LoadPrefabContents(dstPath);
+                Debug.Log($"🔹已加载目标Prefab：{dstPath}");
+            }
+            else
+            {
+                dstRoot = targetPrefab;
             }
 
-            if (copyMaterials || copyBlendShapes)
+            CopySettingsCore(srcRoot, dstRoot);
+
+            if (dstIsPrefabAsset && dstRoot != null)
             {
-                var srcRenderers = src.GetComponentsInChildren<SkinnedMeshRenderer>(true);
-                var dstRenderers = dst.GetComponentsInChildren<SkinnedMeshRenderer>(true);
-                for (int i = 0; i < Mathf.Min(srcRenderers.Length, dstRenderers.Length); i++)
-                {
-                    var sR = srcRenderers[i];
-                    var dR = dstRenderers[i];
-
-                    if (copyMaterials)
-                        dR.sharedMaterials = sR.sharedMaterials;
-
-                    if (copyBlendShapes && sR.sharedMesh != null && dR.sharedMesh != null)
-                    {
-                        int count = Math.Min(sR.sharedMesh.blendShapeCount, dR.sharedMesh.blendShapeCount);
-                        for (int j = 0; j < count; j++)
-                        {
-                            string name = sR.sharedMesh.GetBlendShapeName(j);
-                            int targetIndex = FindBlendShapeIndexByName(dR.sharedMesh, name);
-                            if (targetIndex >= 0)
-                                dR.SetBlendShapeWeight(targetIndex, sR.GetBlendShapeWeight(j));
-                        }
-                    }
-                }
-                copied++;
+                PrefabUtility.SaveAsPrefabAsset(dstRoot, dstPath);
+                PrefabUtility.UnloadPrefabContents(dstRoot);
+                Debug.Log("💾 已保存修改到目标Prefab。");
             }
 
-            if (copyVRCDescriptor)
-            {
-#if VRC_SDK_VRCSDK3
-                var srcDesc = src.GetComponent<VRC.SDK3.Avatars.Components.VRCAvatarDescriptor>();
-                var dstDesc = dst.GetComponent<VRC.SDK3.Avatars.Components.VRCAvatarDescriptor>();
-                if (srcDesc && dstDesc)
-                {
-                    EditorUtility.CopySerialized(srcDesc, dstDesc);
-                    copied++;
-                }
-#endif
-            }
+            if (srcIsPrefabAsset && srcRoot != null)
+                PrefabUtility.UnloadPrefabContents(srcRoot);
 
-            if (copyDynamicBones)
-            {
-                var srcBones = src.GetComponentsInChildren<Component>(true)
-                    .Where(c => c && (c.GetType().Name.Contains("DynamicBone") || c.GetType().Name.Contains("PhysBone")));
-                foreach (var srcBone in srcBones)
-                {
-                    var path = GetRelativePath(src.transform, srcBone.transform);
-                    var dstBoneObj = dst.transform.Find(path);
-                    if (dstBoneObj)
-                    {
-                        var dstBone = dstBoneObj.GetComponent(srcBone.GetType());
-                        if (dstBone)
-                        {
-                            EditorUtility.CopySerialized(srcBone, dstBone);
-                            copied++;
-                        }
-                    }
-                }
-            }
-
-            if (copyAllComponents)
-            {
-                CopyAllComponents(src, dst);
-                copied++;
-            }
-
-            Debug.Log($"✅ 成功复制 {copied} 项设置（包括 BlendShape 如已选）。");
-            EditorUtility.DisplayDialog("完成", $"已复制 {copied} 项设置。", "确定");
+            EditorUtility.DisplayDialog("完成", "模型设置已成功复制！", "确定");
         }
         catch (Exception ex)
         {
-            Debug.LogError($"❌ 复制出错：{ex.Message}");
+            Debug.LogError($"❌ 复制失败: {ex.Message}");
         }
+    }
+
+    // ----------- 判断对象是否是Prefab资产 -----------
+    bool IsPrefabAsset(GameObject obj)
+    {
+        return obj != null && !obj.scene.IsValid() &&
+               PrefabUtility.GetPrefabAssetType(obj) != PrefabAssetType.NotAPrefab;
+    }
+
+    // ----------- 核心复制逻辑 -----------
+    void CopySettingsCore(GameObject src, GameObject dst)
+    {
+        Undo.RegisterFullObjectHierarchyUndo(dst, "Copy Model Settings");
+
+        if (copyTransform)
+        {
+            dst.transform.localPosition = src.transform.localPosition;
+            dst.transform.localRotation = src.transform.localRotation;
+            dst.transform.localScale = src.transform.localScale;
+        }
+
+        if (copyAnimator)
+        {
+            var srcAnim = src.GetComponent<Animator>();
+            var dstAnim = dst.GetComponent<Animator>();
+            if (srcAnim && dstAnim)
+            {
+                dstAnim.runtimeAnimatorController = srcAnim.runtimeAnimatorController;
+                dstAnim.avatar = srcAnim.avatar;
+            }
+        }
+
+        if (copyMaterials || copyBlendShapes)
+        {
+            var srcRenderers = src.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+            var dstRenderers = dst.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+            for (int i = 0; i < Mathf.Min(srcRenderers.Length, dstRenderers.Length); i++)
+            {
+                var sR = srcRenderers[i];
+                var dR = dstRenderers[i];
+
+                if (copyMaterials)
+                    dR.sharedMaterials = sR.sharedMaterials;
+
+                if (copyBlendShapes && sR.sharedMesh != null && dR.sharedMesh != null)
+                {
+                    for (int j = 0; j < sR.sharedMesh.blendShapeCount; j++)
+                    {
+                        string name = sR.sharedMesh.GetBlendShapeName(j);
+                        int targetIndex = FindBlendShapeIndexByName(dR.sharedMesh, name);
+                        if (targetIndex >= 0)
+                            dR.SetBlendShapeWeight(targetIndex, sR.GetBlendShapeWeight(j));
+                    }
+                }
+            }
+        }
+
+#if VRC_SDK_VRCSDK3
+        if (copyVRCDescriptor)
+        {
+            var srcDesc = src.GetComponent<VRC.SDK3.Avatars.Components.VRCAvatarDescriptor>();
+            var dstDesc = dst.GetComponent<VRC.SDK3.Avatars.Components.VRCAvatarDescriptor>();
+            if (srcDesc && dstDesc)
+                EditorUtility.CopySerialized(srcDesc, dstDesc);
+        }
+#endif
+
+        if (copyDynamicBones)
+        {
+            var srcBones = src.GetComponentsInChildren<Component>(true)
+                .Where(c => c && (c.GetType().Name.Contains("DynamicBone") || c.GetType().Name.Contains("PhysBone")));
+            foreach (var srcBone in srcBones)
+            {
+                var path = GetRelativePath(src.transform, srcBone.transform);
+                var dstBoneObj = dst.transform.Find(path);
+                if (dstBoneObj)
+                {
+                    var dstBone = dstBoneObj.GetComponent(srcBone.GetType());
+                    if (dstBone)
+                        EditorUtility.CopySerialized(srcBone, dstBone);
+                }
+            }
+        }
+
+        if (copyAllComponents)
+            CopyAllComponents(src, dst);
+
+        Debug.Log("✅ 设置复制完成。");
     }
 
     void CopyAllComponents(GameObject src, GameObject dst)
@@ -218,7 +246,6 @@ public class CopyModelSettingsWindow : EditorWindow
             EditorUtility.CopySerialized(srcComp, dstComp);
         }
 
-        // 递归子物体
         for (int i = 0; i < src.transform.childCount; i++)
         {
             var srcChild = src.transform.GetChild(i);
@@ -226,12 +253,6 @@ public class CopyModelSettingsWindow : EditorWindow
             if (dstChild)
                 CopyAllComponents(srcChild.gameObject, dstChild.gameObject);
         }
-    }
-
-    string GetRelativePath(Transform root, Transform current)
-    {
-        if (current == root) return "";
-        return GetRelativePath(root, current.parent) + "/" + current.name;
     }
 
     int FindBlendShapeIndexByName(Mesh mesh, string name)
@@ -242,5 +263,11 @@ public class CopyModelSettingsWindow : EditorWindow
                 return i;
         }
         return -1;
+    }
+
+    string GetRelativePath(Transform root, Transform current)
+    {
+        if (current == root) return "";
+        return GetRelativePath(root, current.parent) + "/" + current.name;
     }
 }
